@@ -1,20 +1,41 @@
 # coding: utf-8
 # 加入上面一句才能使用中文注释
+from collections import deque
+from pyglet import image
 from pyglet.gl import * # OpenGL,GLU接口
-from pyglet.window import key # 键盘常量，事件
+from pyglet.window import key, mouse # 键盘常量，事件
+from pyglet.graphics import TextureGroup
 from ctypes import c_float # 导入c类型的float
 import math
 import random
 import time
 
+TICKS_PER_SEC = 60
 SECTOR_SIZE = 16
+
+WALKING_SPEED = 5
+FLYING_SPEED = 15
+
+GRAVITY = 20.0
+MAX_JUMP_HEIGHT = 1.0 # About the height of a block.
+# To derive the formula for calculating jump speed, first solve
+#    v_t = v_0 + a * t
+# for the time at which you achieve maximum height, where a is the acceleration
+# due to gravity and v_t = 0. This gives:
+#    t = - v_0 / a
+# Use t and the desired MAX_JUMP_HEIGHT to solve for v_0 (jump speed) in
+#    s = s_0 + v_0 * t + (a * t^2) / 2
+JUMP_SPEED = math.sqrt(2 * GRAVITY * MAX_JUMP_HEIGHT)
+TERMINAL_VELOCITY = 50
+
+PLAYER_HEIGHT = 2
 
 # 返回以x,y,z为中心，边长为2n的正方体六个面的顶点坐标
 def cube_vertices(x, y, z, n):
     return [
         x-n,y+n,z-n, x-n,y+n,z+n, x+n,y+n,z+n, x+n,y+n,z-n, # top
         x-n,y-n,z-n, x+n,y-n,z-n, x+n,y-n,z+n, x-n,y-n,z+n, # bottom
-        x-n,y-n,z-n, x-n,y-n,z+n, x-n,y+n,z+n, x-n,y+n,z-n, # left
+        x-n,y-n,z-n, x-n,y-n,z+n, x-n,y+n,z+n, x-n,y+n,z-n, # leftF
         x+n,y-n,z+n, x+n,y-n,z-n, x+n,y+n,z-n, x+n,y+n,z+n, # right
         x-n,y-n,z+n, x+n,y-n,z+n, x+n,y+n,z+n, x-n,y+n,z+n, # front
         x+n,y-n,z-n, x-n,y-n,z-n, x-n,y+n,z-n, x+n,y+n,z-n, # back
@@ -45,6 +66,8 @@ def tex_coords(top, bottom, side):
     result.extend(side * 4)
     return result
 
+TEXTURE_PATH = 'texture.png'
+
 # 计算草块，沙块，砖块，石块6个面的纹理贴图坐标(用一个list保存)
 # 可以看出除了草块，其他的正方体六个而的贴图都一样
 GRASS = tex_coords((1, 0), (0, 1), (0, 0))
@@ -61,18 +84,6 @@ FACES = [
     ( 0, 0, 1),
     ( 0, 0,-1),
 ]
-
-class TextureGroup(pyglet.graphics.Group):
-    def __init__(self, path):
-        super(TextureGroup, self).__init__()
-        # 将纹理图载入显存
-        self.texture = pyglet.image.load(path).get_texture()
-    # 重写父类中的两个方法
-    def set_state(self):
-        glEnable(self.texture.target)
-        glBindTexture(self.texture.target, self.texture.id)
-    def unset_state(self):
-        glDisable(self.texture.target)
 
 # 对位置x,y,z取整
 def normalize(position):
@@ -91,12 +102,12 @@ def sectorize(position):
 class Model(object):
     def __init__(self):
         self.batch = pyglet.graphics.Batch()
-        self.group = TextureGroup('texture.png') # 载入纹理贴图
+        self.group = TextureGroup(image.load(TEXTURE_PATH).get_texture()) # 载入纹理贴图
         self.world = {} # 字典：position:texture的键值对，存在于地图中所有立方体的信息
         self.shown = {} # 字典：position:texture的键值对，显示出来的立方体
         self._shown = {} # 字典：postion:VertexList键值对，VertexList被批量渲染
         self.sectors = {} # 字典：(x,0,z):[position1,position2...]键值对
-        self.queue = [] # 用于存储事件的队列
+        self.queue = deque() # 用于存储事件的队列
         self.initialize() # 画出游戏地图
     # 画地图，大小80*80
     def initialize(self):
@@ -107,12 +118,12 @@ class Model(object):
             for z in range(-n, n + 1, s):
                 # 在地下画一层石头，上面是一层草地
                 # 地面从y=-2开始
-                self.init_block((x, y - 2, z), GRASS)
-                self.init_block((x, y - 3, z), STONE)
+                self.add_block((x, y - 2, z), GRASS, immediate=False)
+                self.add_block((x, y - 3, z), STONE, immediate=False)
                 # 地图的四周用墙围起来
                 if x in (-n, n) or z in (-n, n):
                     for dy in range(-2, 3):
-                        self.init_block((x, y + dy, z), STONE)
+                        self.add_block((x, y + dy, z), STONE, immediate=False)
         o = n - 10 # 为了避免建到墙上，o取n-10
         # 在地面上随机建造一些草块，沙块，砖块
         for _ in range(120): # 只想迭代120次，不需要迭代变量i，直接用 _
@@ -130,7 +141,7 @@ class Model(object):
                             continue
                         if (x - 0) ** 2 + (z - 0) ** 2 < 5 ** 2:
                             continue
-                        self.init_block((x, y, z), t)
+                        self.add_block((x, y, z), t, immediate=False)
                 s -= d
     # 检测鼠标是否能对一个立方体进行操作。
     # 返回key,previous：key是鼠标可操作的块(中心坐标)，根据人所在位置和方向向量求出，
@@ -158,27 +169,24 @@ class Model(object):
             if (x + dx, y + dy, z + dz) not in self.world:
                 return True
         return False
-    # 初始化地图时调用它，但不会同步地绘制出来sync=false
-    # 而是全部添加完一次性绘制
-    def init_block(self, position, texture):
-        self.add_block(position, texture, False)
+
     # 添加立方体
-    def add_block(self, position, texture, sync=True):
+    def add_block(self, position, texture, immediate=True):
         if position in self.world: # 如果position已经存在于world中，要先移除它
-            self.remove_block(position, sync)
+            self.remove_block(position, immediate)
         self.world[position] = texture # 添加相应的位置和纹理
         # 以区域为一组添加立方体的position到字典中，
         # 16*16*y区域内的立方体都映射到一个键值,这些立方体position以tuble形式存在于一个列表中
         self.sectors.setdefault(sectorize(position), []).append(position)
-        if sync: # 初始时该变量为false，不会同步绘制
+        if immediate: # 初始时该变量为false，不会同步绘制
             if self.exposed(position): # 如果同步绘制，且该位置是显露在外的
                 self.show_block(position) # 绘制该立方体
             self.check_neighbors(position)
     # 删除立方体
-    def remove_block(self, position, sync=True):
+    def remove_block(self, position, immediate=True):
         del self.world[position] # 把world中的position,texture对删除
         self.sectors[sectorize(position)].remove(position) # 把区域中相应的position删除
-        if sync: # 如果同步
+        if immediate: # 如果同步
             if position in self.shown: # 如果position在显示列表中
                 self.hide_block(position) # 立即删除它
             self.check_neighbors(position)
@@ -208,32 +216,21 @@ class Model(object):
         if immediate: # 立即绘制
             self._show_block(position, texture)
         else: # 不立即绘制，进入事件队列
-            self.enqueue(self._show_block, position, texture)
+            self._enqueue(self._show_block, position, texture)
     # 添加顶点列表(VertexList)到渲染对象，(on_draw会指渲染它)
     # 并将position:VertexList对存入_shown
     def _show_block(self, position, texture):
         x, y, z = position
-        # only show exposed faces
-        # 只显示看得见的面
-        index = 0
-        count = 24
+
+
         # 中心为x,y,z的1*1*1正方体
         # 顶点坐标数据和纹理坐标数据
         vertex_data = cube_vertices(x, y, z, 0.5)
         texture_data = list(texture)
-        for dx, dy, dz in []:#FACES: 作者注释掉了FACES，此for循环不执行，即所有面都绘制
-            if (x + dx, y + dy, z + dz) in self.world:
-                count -= 4
-                i = index * 12
-                j = index * 8
-                del vertex_data[i:i + 12]
-                del texture_data[j:j + 8]
-            else:
-                index += 1
         # create vertex list
         # 添加顶点列表(VertexList)到批渲染对象中
         # 顶点数目count=24(6个面，一个面4个点)
-        self._shown[position] = self.batch.add(count, GL_QUADS, self.group,
+        self._shown[position] = self.batch.add(24, GL_QUADS, self.group,
             ('v3f/static', vertex_data),
             ('t2f/static', texture_data))
     # 隐藏立方体
@@ -242,7 +239,7 @@ class Model(object):
         if immediate: # 立即移除，从图上消失
             self._hide_block(position)
         else: # 不立即移除，进行事件队列等待处理
-            self.enqueue(self._hide_block, position)
+            self._enqueue(self._hide_block, position)
     # 立即移除立方体
     # 将position位置的顶点列表弹出并删除，相应的立方体立即被移除(其实是在update之后)
     def _hide_block(self, position):
@@ -282,22 +279,22 @@ class Model(object):
         for sector in hide:
             self.hide_sector(sector)
     # 添加事件到队列queue
-    def enqueue(self, func, *args):
+    def _enqueue(self, func, *args):
         self.queue.append((func, args))
     # 处理队头事件
-    def dequeue(self):
-        func, args = self.queue.pop(0)
+    def _dequeue(self):
+        func, args = self.queue.popleft()
         func(*args)
     # 用1/60秒的时间来处理队列中的事件
     # 不一定要处理完
     def process_queue(self):
         start = time.clock()
-        while self.queue and time.clock() - start < 1 / 60.0:
-            self.dequeue()
+        while self.queue and time.clock() - start < 1.0 / TICKS_PER_SEC:
+            self._dequeue()
     # 处理事件队列中的所有事件
     def process_entire_queue(self):
         while self.queue:
-            self.dequeue()
+            self._dequeue()
 
 class Window(pyglet.window.Window):
     def __init__(self, *args, **kwargs):
@@ -328,7 +325,7 @@ class Window(pyglet.window.Window):
         self.label = pyglet.text.Label('', font_name='Arial', font_size=18,
             x=10, y=self.height - 10, anchor_x='left', anchor_y='top',
             color=(0, 0, 0, 255))
-        pyglet.clock.schedule_interval(self.update, 1.0 / 60)# 每秒刷新60次
+        pyglet.clock.schedule_interval(self.update, 1.0 / TICKS_PER_SEC)# 每秒刷新60次
     # 设置鼠标事件是否绑定到游戏窗口
     def set_exclusive_mouse(self, exclusive):
         super(Window, self).set_exclusive_mouse(exclusive)
@@ -346,20 +343,22 @@ class Window(pyglet.window.Window):
         if any(self.strafe): # 只要strafe中有一项为真(不为0)，就执行:
             x, y = self.rotation
             strafe = math.degrees(math.atan2(*self.strafe)) # arctan(z/x)，再转换成角度
+            y_angle = math.radians(y)
+            x_angle = math.radians(x + strafe)
             if self.flying: # 如果允许飞，那么运动时会考虑垂直方向即y轴方向的运动
-                m = math.cos(math.radians(y)) # cos(y)
-                dy = math.sin(math.radians(y)) # sin(y)
+                m = math.cos(y_angle) # cos(y)
+                dy = math.sin(y_angle) # sin(y)
                 if self.strafe[1]: # 如果x不为0
                     dy = 0.0
                     m = 1
                 if self.strafe[0] > 0: # 如果z大于0
                     dy *= -1
-                dx = math.cos(math.radians(x + strafe)) * m
-                dz = math.sin(math.radians(x + strafe)) * m
+                dx = math.cos(x_angle) * m
+                dz = math.sin(x_angle) * m
             else:
                 dy = 0.0
-                dx = math.cos(math.radians(x + strafe))
-                dz = math.sin(math.radians(x + strafe))
+                dx = math.cos(x_angle)
+                dz = math.sin(x_angle)
         else:
             dy = 0.0
             dx = 0.0
@@ -381,19 +380,19 @@ class Window(pyglet.window.Window):
     # 更新self.dy和self.position
     def _update(self, dt):
         # walking
-        speed = 15 if self.flying else 5 # 如果能飞，速度15；否则为5
+        speed = FLYING_SPEED if self.flying else WALKING_SPEED # 如果能飞，速度15；否则为5
         d = dt * speed
         dx, dy, dz = self.get_motion_vector()
         dx, dy, dz = dx * d, dy * d, dz * d
         # gravity # 如果不能飞，则使其在y方向上符合重力规律
         if not self.flying:
-            self.dy -= dt * 0.044 # g force, should be = jump_speed * 0.5 / max_jump_height
-            self.dy = max(self.dy, -0.5) # terminal velocity
-            dy += self.dy
+            self.dy -= dt * GRAVITY # g force, should be = jump_speed * 0.5 / max_jump_height
+            self.dy = max(self.dy, -TERMINAL_VELOCITY) # terminal velocity
+            dy += self.dy * dt
         # collisions
         x, y, z = self.position
         # 碰撞检测后应该移动到的位置
-        x, y, z = self.collide((x + dx, y + dy, z + dz), 2)
+        x, y, z = self.collide((x + dx, y + dy, z + dz), PLAYER_HEIGHT)
         self.position = (x, y, z) # 更新位置
     # 碰撞检测
     # 返回的p是碰撞检测后应该移动到的位置
@@ -414,34 +413,26 @@ class Window(pyglet.window.Window):
                     op = list(np)
                     op[1] -= dy
                     op[i] += face[i]
-                    op = tuple(op)
-                    if op not in self.model.world:
+                    if tuple(op) not in self.model.world:
                         continue
                     p[i] -= (d - pad) * face[i]
                     if face == (0, -1, 0) or face == (0, 1, 0):
                         self.dy = 0
                     break
         return tuple(p)
-    # 第一句直接return，所以此函数不做任何事
-    def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
-        return
-        x, y, z = self.position
-        dx, dy, dz = self.get_sight_vector()
-        d = scroll_y * 10
-        self.position = (x + dx * d, y + dy * d, z + dz * d)
+
     # 鼠标按下事件
     def on_mouse_press(self, x, y, button, modifiers):
         if self.exclusive: # 当鼠标事件已经绑定了此窗口
             vector = self.get_sight_vector()
             block, previous = self.model.hit_test(self.position, vector)
-            if button == pyglet.window.mouse.LEFT:
-                if block: # 如果按下左键且该处有block
-                    texture = self.model.world[block]
-                    if texture != STONE: # 如果block不是石块，就移除它
-                        self.model.remove_block(block)
-            else: # 如果按下右键，且有previous位置，则在previous处增加方块
+            if (button == mouse.RIGHT) or ((button == mouse.LEFT) and (modifiers & key.MOD_CTRL)):
                 if previous:
                     self.model.add_block(previous, self.block)
+            elif button == pyglet.window.mouse.LEFT and block:
+                texture = self.model.world[block]
+                if texture != STONE:
+                    self.model.remove_block(block)
         else: # 否则隐藏鼠标，并绑定鼠标事件到该窗口
             self.set_exclusive_mouse(True)
     # 鼠标移动事件，处理视角的变化
@@ -467,7 +458,7 @@ class Window(pyglet.window.Window):
             self.strafe[1] += 1
         elif symbol == key.SPACE:
             if self.dy == 0:
-                self.dy = 0.015 # jump speed
+                self.dy = JUMP_SPEED # jump speed
         elif symbol == key.ESCAPE: # 鼠标退出当前窗口
             self.set_exclusive_mouse(False)
         elif symbol == key.TAB: # 切换是否能飞，即是否可以在垂直方向y上运动
@@ -556,15 +547,15 @@ class Window(pyglet.window.Window):
 
 def setup_fog(): # 设置雾效果
     glEnable(GL_FOG)
-    glFogfv(GL_FOG_COLOR, (c_float * 4)(0.53, 0.81, 0.98, 1))
+    glFogfv(GL_FOG_COLOR, (c_float * 4)(0.5, 0.69, 1.0, 1))
     glHint(GL_FOG_HINT, GL_DONT_CARE)
     glFogi(GL_FOG_MODE, GL_LINEAR)
-    glFogf(GL_FOG_DENSITY, 0.35)
+    #glFogf(GL_FOG_DENSITY, 0.35)
     glFogf(GL_FOG_START, 20.0)
     glFogf(GL_FOG_END, 60.0)
 
 def setup():
-    glClearColor(0.53, 0.81, 0.98, 1)
+    glClearColor(0.5, 0.69, 1.0, 1)
     glEnable(GL_CULL_FACE)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
