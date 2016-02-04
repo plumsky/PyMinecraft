@@ -103,19 +103,19 @@ class Model(object):
         n = 80 # 地图大小
         s = 1 # 步长
         y = 0
-        for x in xrange(-n, n + 1, s):
-            for z in xrange(-n, n + 1, s):
+        for x in range(-n, n + 1, s):
+            for z in range(-n, n + 1, s):
                 # 在地下画一层石头，上面是一层草地
                 # 地面从y=-2开始
                 self.init_block((x, y - 2, z), GRASS)
                 self.init_block((x, y - 3, z), STONE)
                 # 地图的四周用墙围起来
                 if x in (-n, n) or z in (-n, n):
-                    for dy in xrange(-2, 3):
+                    for dy in range(-2, 3):
                         self.init_block((x, y + dy, z), STONE)
         o = n - 10 # 为了避免建到墙上，o取n-10
         # 在地面上随机建造一些草块，沙块，砖块
-        for _ in xrange(120): # 只想迭代120次，不需要迭代变量i，直接用 _
+        for _ in range(120): # 只想迭代120次，不需要迭代变量i，直接用 _
             a = random.randint(-o, o) # 在[-o,o]内随机取一个整数
             b = random.randint(-o, o)
             c = -1
@@ -123,9 +123,9 @@ class Model(object):
             s = random.randint(4, 8)
             d = 1
             t = random.choice([GRASS, SAND, BRICK]) # 随机选择一个纹理
-            for y in xrange(c, c + h):
-                for x in xrange(a - s, a + s + 1):
-                    for z in xrange(b - s, b + s + 1):
+            for y in range(c, c + h):
+                for x in range(a - s, a + s + 1):
+                    for z in range(b - s, b + s + 1):
                         if (x - a) ** 2 + (z - b) ** 2 > (s + 1) ** 2:
                             continue
                         if (x - 0) ** 2 + (z - 0) ** 2 < 5 ** 2:
@@ -142,7 +142,7 @@ class Model(object):
         x, y, z = position
         dx, dy, dz = vector
         previous = None
-        for _ in xrange(max_distance * m): # 迭代8*8=64次
+        for _ in range(max_distance * m): # 迭代8*8=64次
             key = normalize((x, y, z))
             if key != previous and key in self.world:
                 return key, previous
@@ -194,7 +194,7 @@ class Model(object):
                 if key not in self.shown: # 且没有在显示列表中
                     self.show_block(key) # 则立即绘制出来
             else: # 如果没有暴露在外，而又在显示列表中，则立即隐藏(删除)它
-                if key in self.shown: 
+                if key in self.shown:
                     self.hide_block(key)
     # 将world中还没显示且显露在外的立方体绘制出来
     def show_blocks(self):
@@ -219,7 +219,7 @@ class Model(object):
         count = 24
         # 中心为x,y,z的1*1*1正方体
         # 顶点坐标数据和纹理坐标数据
-        vertex_data = cube_vertices(x, y, z, 0.5) 
+        vertex_data = cube_vertices(x, y, z, 0.5)
         texture_data = list(texture)
         for dx, dy, dz in []:#FACES: 作者注释掉了FACES，此for循环不执行，即所有面都绘制
             if (x + dx, y + dy, z + dz) in self.world:
@@ -233,7 +233,7 @@ class Model(object):
         # create vertex list
         # 添加顶点列表(VertexList)到批渲染对象中
         # 顶点数目count=24(6个面，一个面4个点)
-        self._shown[position] = self.batch.add(count, GL_QUADS, self.group, 
+        self._shown[position] = self.batch.add(count, GL_QUADS, self.group,
             ('v3f/static', vertex_data),
             ('t2f/static', texture_data))
     # 隐藏立方体
@@ -259,14 +259,14 @@ class Model(object):
         for position in self.sectors.get(sector, []):
             if position in self.shown:
                 self.hide_block(position, False) # 放入事件队列，不会立即隐藏
-    
+
     def change_sectors(self, before, after):
         before_set = set()
         after_set = set()
         pad = 4
-        for dx in xrange(-pad, pad + 1):
-            for dy in [0]: # xrange(-pad, pad + 1):
-                for dz in xrange(-pad, pad + 1):
+        for dx in range(-pad, pad + 1):
+            for dy in [0]: # range(-pad, pad + 1):
+                for dz in range(-pad, pad + 1):
                     if dx ** 2 + dy ** 2 + dz ** 2 > (pad + 1) ** 2:
                         continue
                     if before:
@@ -312,11 +312,11 @@ class Window(pyglet.window.Window):
         # 水平角是方向射线xoz上的投影与z轴负半轴的夹角
         # 俯仰角是方向射线与xoz平面的夹角
         self.rotation = (0, 0)
-        # 
+        #
         self.sector = None
         # reticle表示游戏窗口中间的那个十字
         # 四个点，绘制成两条直线
-        self.reticle = None 
+        self.reticle = None
         self.dy = 0
         self.inventory = [BRICK, GRASS, SAND] # 可以建造的类型
         self.block = self.inventory[0] # 初始时右键建造的是砖块
@@ -325,8 +325,8 @@ class Window(pyglet.window.Window):
             key._6, key._7, key._8, key._9, key._0]
         self.model = Model()
         # 游戏窗口左上角的label参数设置
-        self.label = pyglet.text.Label('', font_name='Arial', font_size=18, 
-            x=10, y=self.height - 10, anchor_x='left', anchor_y='top', 
+        self.label = pyglet.text.Label('', font_name='Arial', font_size=18,
+            x=10, y=self.height - 10, anchor_x='left', anchor_y='top',
             color=(0, 0, 0, 255))
         pyglet.clock.schedule_interval(self.update, 1.0 / 60)# 每秒刷新60次
     # 设置鼠标事件是否绑定到游戏窗口
@@ -376,7 +376,7 @@ class Window(pyglet.window.Window):
             self.sector = sector # 更新sector
         m = 8
         dt = min(dt, 0.2)
-        for _ in xrange(m):
+        for _ in range(m):
             self._update(dt / m)
     # 更新self.dy和self.position
     def _update(self, dt):
@@ -393,7 +393,7 @@ class Window(pyglet.window.Window):
         # collisions
         x, y, z = self.position
         # 碰撞检测后应该移动到的位置
-        x, y, z = self.collide((x + dx, y + dy, z + dz), 2) 
+        x, y, z = self.collide((x + dx, y + dy, z + dz), 2)
         self.position = (x, y, z) # 更新位置
     # 碰撞检测
     # 返回的p是碰撞检测后应该移动到的位置
@@ -404,13 +404,13 @@ class Window(pyglet.window.Window):
         p = list(position) # 将元组变为list
         np = normalize(position) # 取整
         for face in FACES: # 检查周围6个面的立方体
-            for i in xrange(3): # (x,y,z)中每一维单独检测
+            for i in range(3): # (x,y,z)中每一维单独检测
                 if not face[i]: # 如果为0，过
                     continue
                 d = (p[i] - np[i]) * face[i]
                 if d < pad: #
                     continue
-                for dy in xrange(height): # 检测每个高度
+                for dy in range(height): # 检测每个高度
                     op = list(np)
                     op[1] -= dy
                     op[i] += face[i]
@@ -472,7 +472,7 @@ class Window(pyglet.window.Window):
             self.set_exclusive_mouse(False)
         elif symbol == key.TAB: # 切换是否能飞，即是否可以在垂直方向y上运动
             self.flying = not self.flying
-        elif symbol in self.num_keys: 
+        elif symbol in self.num_keys:
             index = (symbol - self.num_keys[0]) % len(self.inventory) # 0,1,2
             self.block = self.inventory[index] # 取得相应的方块类型
     # 释放按键事件
@@ -492,7 +492,7 @@ class Window(pyglet.window.Window):
         # reticle更新，包含四个点，绘制成两条直线
         if self.reticle:
             self.reticle.delete()
-        x, y = self.width / 2, self.height / 2
+        x, y = int(self.width / 2), int(self.height / 2)
         n = 10
         self.reticle = pyglet.graphics.vertex_list(4,
             ('v2i', (x - n, y, x + n, y, x, y - n, x, y + n))
@@ -545,13 +545,14 @@ class Window(pyglet.window.Window):
     def draw_label(self): # 显示帧率，当前位置坐标，显示的方块数及总共的方块数
         x, y, z = self.position
         self.label.text = '%02d (%.2f, %.2f, %.2f) %d / %d' % (
-            pyglet.clock.get_fps(), x, y, z, 
+            pyglet.clock.get_fps(), x, y, z,
             len(self.model._shown), len(self.model.world))
         self.label.draw() # 绘制label的text
     # 绘制游戏窗口中间的十字，一条横线加一条竖线
     def draw_reticle(self):
         glColor3d(0, 0, 1)
-        self.reticle.draw(GL_LINES)
+        if self != None:
+            self.reticle.draw(GL_LINES)
 
 def setup_fog(): # 设置雾效果
     glEnable(GL_FOG)

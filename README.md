@@ -1,10 +1,15 @@
 # Minecraft
 
 这是用Python和Pyglet写的简单的Minecraft游戏，
-从<https://github.com/fogleman/Minecraft>fork过来的，
+从<https://github.com/Hawstein/PyMinecraft> fork过来的，
 一共只有几百行代码，麻雀虽小，五脏俱全，觉得挺有意思的，
 于是把源码读了一遍，并做了详细的注释。
 通过这个例子学习Pyglet和Python游戏编程还是不错的，推荐。
+
+# PS
+做了些修改，使代码可以运行在python3.4+Pyglet1.2.4上。
+注释不是我加的，是Hawstein 加的，表示感谢！
+原项目来自<https://github.com/fogleman/Minecraft>
 
 以下是游戏视频：
 
@@ -13,19 +18,10 @@ http://www.youtube.com/watch?v=kC3lwK631X8
 ## How to Run
 
     pip install pyglet
-    git clone https://github.com/Hawstein/PyMinecraft.git
+    git clone https://github.com/plumsky/PyMinecraft.git
     cd PyMinecraft
     python main.py
 
-在windows和mac下，pyglet还不支持64 python，对于64 mac，可以试一下：
-
-	export VERSIONER_PYTHON_PREFER_32_BIT=yes
-    arch -i386 python main.py
-	
-或者使用支持64位的Pyglet 1.2：
-
-	pip install https://pyglet.googlecode.com/files/pyglet-1.2alpha1.tar.gz 
-	
 ## How to Play
 
 ### 移动
